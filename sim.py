@@ -3,6 +3,7 @@
 
 import argparse
 import itertools
+from math import ceil, factorial
 import pickle
 import random
 from string import hexdigits
@@ -10,7 +11,8 @@ import sys
 import zlib
 
 class EV0LottoSim(object):
-    def __init__(self, num_trials, odds, jackpot, tix_per_trial, nons=3, verbose=False):
+    def __init__(self, num_trials, odds, jackpot, tix_per_trial, 
+                       nons, rollover, perms, verbose=False):
         '''
         Create a simulation for the EV0 lotto scheme to see
         if a self-sustaining lotto is feasible.
@@ -45,12 +47,16 @@ class EV0LottoSim(object):
                 percentage of the ticket sales to roll over into
                 a booster fund
 
-                defaults to 1.0 as a fixed jackpot is being used
-
             nons: int
                 Number of numbers in the drawing
 
-                defaults to 3
+            rollover: float
+                number b/w 0 and 1 representing the percentage of
+                ticket sales to rollover into the next jackpot
+
+            perms: bool
+                whether to use permutations or combinations in
+                checking for a winner
 
             verbose: bool
                 whether or not to be verbose is output during the
@@ -68,6 +74,8 @@ class EV0LottoSim(object):
         self.nons = nons
         self.num_trials = num_trials
         self.odds = odds
+        self.perms = perms
+        self.rollover = rollover
         self.ticket_price = round(jackpot / odds, 8)
         self.tix_per_trial = tix_per_trial
         self.verbose = verbose
@@ -82,7 +90,7 @@ class EV0LottoSim(object):
         self.num_neg_trials = 1 # Start out w/ gain - loss < 0
         self.num_wins = 0
         self.stat_attrs = ('gain', 'loss', 'jackpot', 'num_neg_trials', \
-                            'num_wins', 'odds', 'ticket_price')
+                           'num_wins', 'odds', 'ticket_price', 'tix_per_trial')
         self.stats = {k: [] for k in self.stat_attrs}
 
         # Save the initial values of each parameter
@@ -104,7 +112,10 @@ class EV0LottoSim(object):
         for n in range(self.tix_per_trial):
             hds = [self.rand.choice(hexdigits).upper() \
                     for _ in range(self.nons)]
-            tickets.add(''.join(sorted(hds)))
+            if self.perms:
+                tickets.add(''.join(hds))
+            else:
+                tickets.add(''.join(sorted(hds)))
 
         return tickets
 
@@ -128,13 +139,17 @@ class EV0LottoSim(object):
         for attr in self.stat_attrs:
             print('{}: {}'.format(attr, getattr(self, attr)))
 
+        print('Max Jackpot: {}'.format(sorted(self.stats['jackpot'])[-1]))
         print('Total Gain: {}'.format(round(self.gain - self.loss, 8)))
 
     def _winningNumbersGen(self):
         '''
         Save a lucky numbers generator in the winning_nums attribute
         '''
-        wns = [''.join(sorted(hds[-self.nons:])) for hds in self.hash_list]
+        if self.perms:
+            wns = [''.join(hds[-self.nons:]) for hds in self.hash_list]
+        else:
+            wns = [''.join(sorted(hds[-self.nons:])) for hds in self.hash_list]
         self.winning_nums = itertools.cycle(wns)
 
     def run(self):
@@ -164,6 +179,11 @@ class EV0LottoSim(object):
                 # Start the new jackpot
                 self.loss += self.jackpot
 
+                self.jackpot = self.init['jackpot']
+
+            else:
+                self.jackpot += ticket_sales * self.rollover
+
             # See if we're operating negatiely
             if self.gain - self.loss < 0:
                 self.num_neg_trials += 1
@@ -185,6 +205,53 @@ class EV0LottoSim(object):
                 self.se.write('\n')
 
         self._reportResults()
+
+def bernoulli(trials, odds, wins):
+    '''
+    Bernoulli probability with n trials and 1 / odds
+    chance of success.
+
+    Return float b/w 0 and 1
+
+    Params
+    ------
+        trials: int
+            Number of trials
+
+        odds: int
+            Odds of success as denominator in 1 in odds
+            expressions
+
+        wins: int
+            Minimum number of wins before negative net gain
+    '''
+    def choose(n, k):
+        return factorial(n) / (factorial(k) * factorial(n-k))
+
+    return choose(trials, wins) * \
+           (1 / odds)**wins * \
+           (1 - (1 / odds))**(trials - wins)
+
+def loss_threshold(odds, jackpot, trials):
+    '''
+    Return the minimum number of wins needed before reaching
+    negative net gain.
+
+    Params
+    ------
+        odds: int
+            the odds as passed into the simulator
+            e.g., for 1 in 136 odds, pass in 136
+
+        jackpot: float
+            starting jackpot in BTC
+
+        trials: int
+            number of tickets sold
+
+    '''
+    min_wins = ceil(trials / float(odds * jackpot))
+    return int(min_wins)
 
 if __name__ == '__main__':
     desc = '''
@@ -222,6 +289,19 @@ if __name__ == '__main__':
                   , type=int
                   )
 
+    p.add_argument( '-p'
+                  , '--perms'
+                  , action='store_true'
+                  , help='Whether order matters for winning the lotto'
+                  )
+
+    p.add_argument( '-r'
+                  , '--rollover'
+                  , default=0.0
+                  , help='Percentage of ticket sales to roll into next jackpot'
+                  , type=float
+                  )
+
     p.add_argument( '-t'
                   , '--tix-per-trial'
                   , default=10
@@ -237,7 +317,13 @@ if __name__ == '__main__':
 
     args = p.parse_args()
 
-    sim = EV0LottoSim(args.num_trials, args.odds,
-            args.jackpot, args.tix_per_trial,
-            args.num_digits, args.verbose)
+    sim = EV0LottoSim(args.num_trials, 
+            args.odds,
+            args.jackpot, 
+            args.tix_per_trial,
+            args.num_digits, 
+            args.rollover,
+            args.perms,
+            args.verbose)
     sim.run()
+
