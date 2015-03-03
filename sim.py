@@ -2,13 +2,19 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+from functools import partial
 import itertools
-from math import ceil, factorial
+from math import ceil
 import pickle
 import random
 from string import hexdigits
 import sys
 import zlib
+
+try:
+    from gmpy2 import comb
+except ImportError:
+    quit('You must install gmpy2')
 
 class EV0LottoSim(object):
     def __init__(self, num_trials, odds, jackpot, tix_per_trial, 
@@ -206,6 +212,27 @@ class EV0LottoSim(object):
 
         self._reportResults()
 
+def at_least(trials, odds, wins):
+    '''
+    Calculates the probability of at least wins successes
+    in n trials with a given odds of success.
+
+    Params
+    ------
+        trials: int
+            Number of trials
+
+        odds: int
+            Odds of success as denominator in 1 in odds
+            expressions
+
+        wins: int
+            Minimum number of wins before negative net gain
+    '''
+    b_part = partial(bernoulli, trials, odds)
+    p = map(b_part, range(wins, trials+1))
+    return sum(p)
+
 def bernoulli(trials, odds, wins):
     '''
     Bernoulli probability with n trials and 1 / odds
@@ -225,10 +252,7 @@ def bernoulli(trials, odds, wins):
         wins: int
             Minimum number of wins before negative net gain
     '''
-    def choose(n, k):
-        return factorial(n) / (factorial(k) * factorial(n-k))
-
-    return choose(trials, wins) * \
+    return comb(trials, wins) * \
            (1 / odds)**wins * \
            (1 - (1 / odds))**(trials - wins)
 
@@ -250,7 +274,8 @@ def loss_threshold(odds, jackpot, trials):
             number of tickets sold
 
     '''
-    min_wins = ceil(trials / float(odds * jackpot))
+    max_loot = trials * float(jackpot / odds)
+    min_wins = ceil(max_loot / jackpot)
     return int(min_wins)
 
 if __name__ == '__main__':
@@ -326,4 +351,3 @@ if __name__ == '__main__':
             args.perms,
             args.verbose)
     sim.run()
-
