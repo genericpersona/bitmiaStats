@@ -16,6 +16,11 @@ try:
 except ImportError:
     quit('You must install gmpy2')
 
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    quit('What are you doing without matplotlib?!')
+
 class EV0LottoSim(object):
     def __init__(self, num_trials, odds, jackpot, tix_per_trial, 
                        tix_percentage, nons, rollover, perms, 
@@ -272,6 +277,64 @@ def loss_threshold(odds, jackpot, trials):
     min_wins = ceil(max_loot / jackpot)
     return int(min_wins)
 
+def plot_n_runs(args):
+    '''
+    Create n subplots of different simulations to compare
+    variance visually.
+    '''
+    line_types = ['-', '--', ':', ',', 'o', 'v', '^', '<', '>', '1', '2']
+    try:
+        rows, cols = args.iterations // (args.iterations // args.cols), \
+                        args.iterations // args.cols
+    except ZeroDivisionError:
+        rows, cols = args.iterations, 1
+
+    fig, axs = plt.subplots(nrows=rows, ncols=cols)
+
+    for n in range(args.iterations):
+        sim = run_sim(args)
+
+        for i, attr in enumerate(sim.stat_attrs):
+            if attr not in ('gain', 'loss'):
+                continue
+
+            xs = [n-1 for n in range(1, 
+                                sim.tix_per_trial*sim.num_trials+1, 
+                                sim.tix_per_trial)]
+            row, col = divmod(n, cols)
+            if cols > 1:
+                ax = axs[row][col]
+            else:
+                ax = axs
+            ax.set_title('Total Gain: {} | Neg Trials: {}'.\
+                    format(round(sim.gain - sim.loss, 4), sim.num_neg_trials))
+            ax.set_xlabel('# tickets sold')
+            ax.plot(xs, sim.stats[attr], 
+               'k{}'.format(line_types[i % len(line_types)]),
+               label=attr.replace('_', ' ').title())
+
+        legend = ax.legend(loc='upper left', shadow=True, fontsize=14)
+        legend.get_frame().set_facecolor('#696900')
+
+    plt.show()
+
+def run_sim(args):
+    '''
+    Run a simulation and return the simulation 
+    object
+    '''
+    sim = EV0LottoSim(args.num_trials, 
+            args.odds,
+            args.jackpot, 
+            args.tix_per_trial,
+            args.tix_percentage,
+            args.num_digits, 
+            args.rollover,
+            args.perms,
+            args.verbose)
+    sim.run()
+    return sim
+
 if __name__ == '__main__':
     desc = '''
            Run bitmia EV0 Lotto Simulations
@@ -280,11 +343,31 @@ if __name__ == '__main__':
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog='bitmia EV0 lotto simulator')
 
+    p.add_argument( '-c'
+                  , '--cols'
+                  , default=5
+                  , help='Number of columns to plot'
+                  , type=int
+                  )
+
     p.add_argument( '-d'
                   , '--num-digits'
                   , help='Number of hex digits in lotto'
                   , default=2
                   , type=int
+                  )
+
+    p.add_argument( '-i'
+                  , '--iterations'
+                  , help='Number of iterations to plot'
+                  , default=1
+                  , type=int
+                  )
+
+    p.add_argument( '-g'
+                  , '--graph'
+                  , action='store_true'
+                  , help='Whether to display graphs'
                   )
 
     p.add_argument( '-j'
@@ -313,6 +396,7 @@ if __name__ == '__main__':
                   , action='store_true'
                   , help='Whether order matters for winning the lotto'
                   )
+
 
     p.add_argument( '-r'
                   , '--rollover'
@@ -343,13 +427,7 @@ if __name__ == '__main__':
 
     args = p.parse_args()
 
-    sim = EV0LottoSim(args.num_trials, 
-            args.odds,
-            args.jackpot, 
-            args.tix_per_trial,
-            args.tix_percentage,
-            args.num_digits, 
-            args.rollover,
-            args.perms,
-            args.verbose)
-    sim.run()
+    if args.graph:
+        plot_n_runs(args)
+    else:
+        run_sim(args)
