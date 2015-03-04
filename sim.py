@@ -18,7 +18,8 @@ except ImportError:
 
 class EV0LottoSim(object):
     def __init__(self, num_trials, odds, jackpot, tix_per_trial, 
-                       nons, rollover, perms, verbose=False):
+                       tix_percentage, nons, rollover, perms, 
+                       verbose=False):
         '''
         Create a simulation for the EV0 lotto scheme to see
         if a self-sustaining lotto is feasible.
@@ -41,17 +42,8 @@ class EV0LottoSim(object):
             tix_per_trial: int
                 number of tickets to generate for each trial
 
-            price_threshold: float
-                how many times the initial price to go before
-                changing the odds
-
-                for example, 5 means once the ticket price is
-                5x or more the initial price, the odds change
-                to reset the price back to the original
-
-            percent_booster: float 
-                percentage of the ticket sales to roll over into
-                a booster fund
+            tix_percentage: float
+                percentage of EV0 ticket price to charge
 
             nons: int
                 Number of numbers in the drawing
@@ -82,8 +74,9 @@ class EV0LottoSim(object):
         self.odds = odds
         self.perms = perms
         self.rollover = rollover
-        self.ticket_price = round(jackpot / odds, 8)
+        self.ticket_price = round(jackpot / odds, 8) * tix_percentage
         self.tix_per_trial = tix_per_trial
+        self.tix_percentage = tix_percentage
         self.verbose = verbose
 
         # Helpful renaming
@@ -96,7 +89,8 @@ class EV0LottoSim(object):
         self.num_neg_trials = 1 # Start out w/ gain - loss < 0
         self.num_wins = 0
         self.stat_attrs = ('gain', 'loss', 'jackpot', 'num_neg_trials', \
-                           'num_wins', 'odds', 'ticket_price', 'tix_per_trial')
+                           'num_wins', 'odds', 'ticket_price', 'tix_percentage',
+                           'tix_per_trial')
         self.stats = {k: [] for k in self.stat_attrs}
 
         # Save the initial values of each parameter
@@ -340,12 +334,20 @@ if __name__ == '__main__':
                   , help='Control verbosity of output'
                   )
 
+    p.add_argument( '-x'
+                  , '--tix-percentage'
+                  , default=1.0
+                  , help='Percentage of EV0 ticket price to charge'
+                  , type=float
+                  )
+
     args = p.parse_args()
 
     sim = EV0LottoSim(args.num_trials, 
             args.odds,
             args.jackpot, 
             args.tix_per_trial,
+            args.tix_percentage,
             args.num_digits, 
             args.rollover,
             args.perms,
