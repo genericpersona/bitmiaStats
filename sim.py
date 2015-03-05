@@ -280,11 +280,13 @@ def plot_runs(args):
         pos = len(list(filter(lambda n: n >=0, net_gain)))
         per_pos = round((pos / len(net_gain)) * 100, 2)
         plt.ylabel('BTC')
+        plt.xlabel('Simulation #')
         plt.title('Net Gain ({}% Positive)'.format(per_pos))
 
     def plot_tbws():
         plt.plot(range(1, len(tbws)+1),
                 tbws, 'ro')
+        plt.xlabel('Sample #')
         plt.ylabel('# Tickets b/w Wins')
         mean = round(np.mean(tbws), 2)
         std = round(np.std(tbws), 2)
@@ -313,16 +315,14 @@ def plot_runs(args):
     elif args.time_between_wins:
         plot_tbws()
 
-    plot_tbws()
     descr = '{:,} Simulations ({:,} Tickets Each)\n'.format(args.simulations, args.tix_total)
     descr += '1 in {} Odds ({} BTC Jackpot)\n'.format(sim.odds, args.jackpot)
     plt.annotate(descr, (0,0), (0, -20), 
             xycoords='axes fraction', 
             textcoords='offset points', 
             va='top')
-    plt.xlabel('# Tickets Sold')
     if args.output:
-        plt.savefig(args.output, format='png') 
+        plt.savefig(args.output, format='png', dpi=600)
     plt.show()
 
 def run_sim(args):
