@@ -3,7 +3,7 @@
 
 import argparse
 from functools import partial
-import itertools
+import itertools as it
 from math import ceil
 import pickle
 import random
@@ -21,34 +21,29 @@ try:
 except ImportError:
     quit('What are you doing without matplotlib?!')
 
+try:
+    import numpy as np
+except ImportError:
+    quit('Get NumPy now, silly!')
+
 class EV0LottoSim(object):
-    def __init__(self, num_trials, odds, jackpot, tix_per_trial, 
-                       tix_percentage, nons, rollover, perms, 
-                       verbose=False):
+    def __init__(self, jackpot, tix_percentage, tix_total, nons, rollover, 
+                 perms, verbose=False):
         '''
         Create a simulation for the EV0 lotto scheme to see
         if a self-sustaining lotto is feasible.
 
         Params
         ------
-            num_trials: int
-                number of trials to run
-
-            odds: int
-                the odds of winning the lotto in the form 1 in n odds
-                odds should be set to the value of n
-
-                for example, 1 in 100 odds would have pass in 100
-
             jackpot: float
                 BTC making up the jackpot
                 jackpot = ticket price * odds  
 
-            tix_per_trial: int
-                number of tickets to generate for each trial
-
             tix_percentage: float
                 percentage of EV0 ticket price to charge
+
+            tix_total: int
+                total number of tickets to generate
 
             nons: int
                 Number of numbers in the drawing
@@ -75,12 +70,15 @@ class EV0LottoSim(object):
         # Boring saving of parameters
         self.jackpot = jackpot
         self.nons = nons
-        self.num_trials = num_trials
-        self.odds = odds
         self.perms = perms
+        if self.perms:
+            self.odds = it.permutations(hexdigits[:16], nons)
+        else:
+            self.odds = it.combinations_with_replacement(hexdigits[:16], nons)
+        self.odds = len(list(self.odds))
         self.rollover = rollover
-        self.ticket_price = round(jackpot / odds, 8) * tix_percentage
-        self.tix_per_trial = tix_per_trial
+        self.tix_total = tix_total
+        self.ticket_price = round((jackpot * tix_percentage) / self.odds, 8)
         self.tix_percentage = tix_percentage
         self.verbose = verbose
 
@@ -91,11 +89,11 @@ class EV0LottoSim(object):
         # Save some of the accounting variables
         self.gain = 0.0
         self.loss = jackpot # Must shclep out money for first jackpot
-        self.num_neg_trials = 1 # Start out w/ gain - loss < 0
+        self.num_neg_trials = 0 # Haven't sold any tickets yet
         self.num_wins = 0
         self.stat_attrs = ('gain', 'loss', 'jackpot', 'num_neg_trials', \
                            'num_wins', 'odds', 'ticket_price', 'tix_percentage',
-                           'tix_per_trial')
+                           'tix_total')
         self.stats = {k: [] for k in self.stat_attrs}
 
         # Save the initial values of each parameter
@@ -107,22 +105,18 @@ class EV0LottoSim(object):
         self._loadBlockHashes()
         self._winningNumbersGen()
 
-    def _generateTickets(self):
+    def _generateTicket(self):
         '''
-        Generate random tickets to compare against the blockchain
+        Generate random ticket to compare against the blockchain
         for determining a winner.
         '''
-        tickets = set() 
-
-        for n in range(self.tix_per_trial):
-            hds = [self.rand.choice(hexdigits).upper() \
-                    for _ in range(self.nons)]
-            if self.perms:
-                tickets.add(''.join(hds))
-            else:
-                tickets.add(''.join(sorted(hds)))
-
-        return tickets
+        hds = ''.join(set(hexdigits.upper()))
+        ticket = [self.rand.choice(hds) for _ in range(self.nons)]
+        
+        if self.perms:
+            return ''.join(ticket)
+        else:
+            return ''.join(sorted(ticket))
 
     def _loadBlockHashes(self):
         '''
@@ -137,7 +131,7 @@ class EV0LottoSim(object):
 
         Not meant to be called outside of the run method
         '''
-        header = '\nSimulation results for {} trials'.format(self.num_trials)
+        header = '\nSimulation results for {} trials'.format(self.tix_total)
         print(header)
         print('{}\n'.format('-' * len(header)))
 
@@ -155,7 +149,7 @@ class EV0LottoSim(object):
             wns = [''.join(hds[-self.nons:]) for hds in self.hash_list]
         else:
             wns = [''.join(sorted(hds[-self.nons:])) for hds in self.hash_list]
-        self.winning_nums = itertools.cycle(wns)
+        self.winning_nums = it.cycle(wns)
 
     def run(self):
         '''
@@ -168,13 +162,12 @@ class EV0LottoSim(object):
             -- See if any ticket was a winner
             -- Adjust the balance of the lotto accordingly
         '''
-        for n in range(self.num_trials):
-            # Each trial brings in a certain amount of ticket sales
-            ticket_sales = self.ticket_price * self.tix_per_trial
-            self.gain += ticket_sales 
+        for n in range(self.tix_total):
+            # Each trial brings in a gain from the ticket sold
+            self.gain += self.ticket_price
 
             # See if there's a winner
-            if next(self.winning_nums) in self._generateTickets():
+            if next(self.winning_nums) == self._generateTicket():
                 # We have a winner!
                 self.num_wins += 1
 
@@ -187,7 +180,7 @@ class EV0LottoSim(object):
                 self.jackpot = self.init['jackpot']
 
             else:
-                self.jackpot += ticket_sales * self.rollover
+                self.jackpot += self.ticket_price * self.rollover
 
             # See if we're operating negatiely
             if self.gain - self.loss < 0:
@@ -277,45 +270,59 @@ def loss_threshold(odds, jackpot, trials):
     min_wins = ceil(max_loot / jackpot)
     return int(min_wins)
 
-def plot_n_runs(args):
+def plot_runs(args):
     '''
-    Create n subplots of different simulations to compare
-    variance visually.
+    Show the net gain and the time between wins on a plot
     '''
-    line_types = ['-', '--', ':', ',', 'o', 'v', '^', '<', '>', '1', '2']
-    try:
-        rows, cols = args.iterations // (args.iterations // args.cols), \
-                        args.iterations // args.cols
-    except ZeroDivisionError:
-        rows, cols = args.iterations, 1
+    def plot_net_gain():
+        plt.plot(range(1, len(net_gain)+1),
+                net_gain, 'gs')
+        pos = len(list(filter(lambda n: n >=0, net_gain)))
+        per_pos = round((pos / len(net_gain)) * 100, 2)
+        plt.ylabel('BTC')
+        plt.title('Net Gain ({}% Positive)'.format(per_pos))
 
-    fig, axs = plt.subplots(nrows=rows, ncols=cols)
+    def plot_tbws():
+        plt.plot(range(1, len(tbws)+1),
+                tbws, 'ro')
+        plt.ylabel('# Tickets b/w Wins')
+        mean = round(np.mean(tbws), 2)
+        std = round(np.std(tbws), 2)
+        med = round(np.median(tbws), 2)
+        title = 'Time Between Wins (Avg: {}) (Median: {}) (Std Dev: {})'.\
+                format(mean, med, std)
+        plt.title(title)
 
-    for n in range(args.iterations):
+    net_gain = []
+    tbws     = [] # Time between wins  
+    for n in range(args.simulations):
         sim = run_sim(args)
 
-        for i, attr in enumerate(sim.stat_attrs):
-            if attr not in ('gain', 'loss'):
-                continue
+        net_gain.append(sim.gain - sim.loss)
 
-            xs = [n-1 for n in range(1, 
-                                sim.tix_per_trial*sim.num_trials+1, 
-                                sim.tix_per_trial)]
-            row, col = divmod(n, cols)
-            if cols > 1:
-                ax = axs[row][col]
-            else:
-                ax = axs
-            ax.set_title('Total Gain: {} | Neg Trials: {}'.\
-                    format(round(sim.gain - sim.loss, 4), sim.num_neg_trials))
-            ax.set_xlabel('# tickets sold')
-            ax.plot(xs, sim.stats[attr], 
-               'k{}'.format(line_types[i % len(line_types)]),
-               label=attr.replace('_', ' ').title())
+        # last_i contains the last index where a win occurred
+        last_i = 0
+        last_nw = 0
+        for i, num_wins in enumerate(sim.stats['num_wins']):
+            if num_wins != last_nw:
+                tbws.append(i - last_i)
+                last_i, last_nw = i, num_wins
 
-        legend = ax.legend(loc='upper left', shadow=True, fontsize=14)
-        legend.get_frame().set_facecolor('#696900')
+    if args.net_gain:
+        plot_net_gain()
+    elif args.time_between_wins:
+        plot_tbws()
 
+    plot_tbws()
+    descr = '{:,} Simulations ({:,} Tickets Each)\n'.format(args.simulations, args.tix_total)
+    descr += '1 in {} Odds ({} BTC Jackpot)\n'.format(sim.odds, args.jackpot)
+    plt.annotate(descr, (0,0), (0, -20), 
+            xycoords='axes fraction', 
+            textcoords='offset points', 
+            va='top')
+    plt.xlabel('# Tickets Sold')
+    if args.output:
+        plt.savefig(args.output, format='png') 
     plt.show()
 
 def run_sim(args):
@@ -323,11 +330,9 @@ def run_sim(args):
     Run a simulation and return the simulation 
     object
     '''
-    sim = EV0LottoSim(args.num_trials, 
-            args.odds,
-            args.jackpot, 
-            args.tix_per_trial,
+    sim = EV0LottoSim(args.jackpot, 
             args.tix_percentage,
+            args.tix_total,
             args.num_digits, 
             args.rollover,
             args.perms,
@@ -343,31 +348,11 @@ if __name__ == '__main__':
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog='bitmia EV0 lotto simulator')
 
-    p.add_argument( '-c'
-                  , '--cols'
-                  , default=5
-                  , help='Number of columns to plot'
-                  , type=int
-                  )
-
     p.add_argument( '-d'
                   , '--num-digits'
                   , help='Number of hex digits in lotto'
                   , default=2
                   , type=int
-                  )
-
-    p.add_argument( '-i'
-                  , '--iterations'
-                  , help='Number of iterations to plot'
-                  , default=1
-                  , type=int
-                  )
-
-    p.add_argument( '-g'
-                  , '--graph'
-                  , action='store_true'
-                  , help='Whether to display graphs'
                   )
 
     p.add_argument( '-j'
@@ -377,18 +362,14 @@ if __name__ == '__main__':
                   , type=float
                   )
 
-    p.add_argument( '-n'
-                  , '--num-trials'
-                  , default=10**5
-                  , help='Number of trials to run'
-                  , type=int
+    p.add_argument( '--net-gain'
+                  , action='store_true'
+                  , help='Whether to plot net gain'
                   )
-                  
+
     p.add_argument( '-o'
-                  , '--odds'
-                  , default=136
-                  , help='Odds of winning as a 1 in <odds> chance'
-                  , type=int
+                  , '--output'
+                  , help='File path to save figure to'
                   )
 
     p.add_argument( '-p'
@@ -397,7 +378,6 @@ if __name__ == '__main__':
                   , help='Whether order matters for winning the lotto'
                   )
 
-
     p.add_argument( '-r'
                   , '--rollover'
                   , default=0.0
@@ -405,11 +385,23 @@ if __name__ == '__main__':
                   , type=float
                   )
 
+    p.add_argument( '-s'
+                  , '--simulations'
+                  , help='Number of simulations to run'
+                  , default=1
+                  , type=int
+                  )
+
     p.add_argument( '-t'
-                  , '--tix-per-trial'
+                  , '--tix-total'
                   , default=10
                   , help='Tickets generated per trial'
                   , type=int
+                  )
+
+    p.add_argument( '--time-between-wins'
+                  , action='store_true'
+                  , help='Whether to plot time between wins'
                   )
 
     p.add_argument( '-v'
@@ -426,8 +418,4 @@ if __name__ == '__main__':
                   )
 
     args = p.parse_args()
-
-    if args.graph:
-        plot_n_runs(args)
-    else:
-        run_sim(args)
+    plot_runs(args)
