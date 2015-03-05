@@ -174,11 +174,11 @@ class EV0LottoSim(object):
                 # Pay out the jackpot
                 self.loss += self.jackpot
 
-                # Start the new jackpot
-                self.loss += self.jackpot
-
+                # Reset the jackpot to its initial amount
                 self.jackpot = self.init['jackpot']
 
+                # Start the new jackpot
+                self.loss += self.jackpot
             else:
                 self.jackpot += self.ticket_price * self.rollover
 
@@ -281,7 +281,8 @@ def plot_runs(args):
         per_pos = round((pos / len(net_gain)) * 100, 2)
         plt.ylabel('BTC')
         plt.xlabel('Simulation #')
-        plt.title('Net Gain ({}% Positive)'.format(per_pos))
+        plt.title('Net Gain ({}% Positive) (Max: {}) (Min: {})'.\
+            format(per_pos, round(max(net_gain), 2), round(min(net_gain), 2))
 
     def plot_tbws():
         plt.plot(range(1, len(tbws)+1),
@@ -315,7 +316,8 @@ def plot_runs(args):
     elif args.time_between_wins:
         plot_tbws()
 
-    descr = '{:,} Simulations ({:,} Tickets Each)\n'.format(args.simulations, args.tix_total)
+    descr = '{:,} Simulations ({:,} Tickets Each) ({}% rollover)\n'.\
+        format(args.simulations, args.tix_total, round(args.rollover * 100, 2))
     descr += '1 in {} Odds ({} BTC Jackpot)\n'.format(sim.odds, args.jackpot)
     plt.annotate(descr, (0,0), (0, -20), 
             xycoords='axes fraction', 
