@@ -27,8 +27,7 @@ except ImportError:
     quit('Get NumPy now, silly!')
 
 class EV0LottoSim(object):
-    def __init__(self, jackpot, tix_percentage, tix_total, nons, rollover, 
-                 perms, verbose=False):
+    def __init__(self, args):
         '''
         Create a simulation for the EV0 lotto scheme to see
         if a self-sustaining lotto is feasible.
@@ -41,6 +40,9 @@ class EV0LottoSim(object):
 
             tix_percentage: float
                 percentage of EV0 ticket price to charge
+
+            num_drawings: int
+                total number of drawings
 
             tix_total: int
                 total number of tickets to generate
@@ -68,19 +70,16 @@ class EV0LottoSim(object):
                 defaults to False 
         '''
         # Boring saving of parameters
-        self.jackpot = jackpot
-        self.nons = nons
-        self.perms = perms
+        for k, v in vars(args).items():
+            setattr(self, k, v)
         if self.perms:
-            self.odds = it.permutations(hexdigits[:16], nons)
+            self.odds = it.permutations(hexdigits[:16], 
+                                        self.num_digits)
         else:
-            self.odds = it.combinations_with_replacement(hexdigits[:16], nons)
+            self.odds = it.combinations_with_replacement(hexdigits[:16], 
+                                                         self.num_digits)
         self.odds = len(list(self.odds))
-        self.rollover = rollover
-        self.tix_total = tix_total
-        self.ticket_price = round((jackpot * tix_percentage) / self.odds, 8)
-        self.tix_percentage = tix_percentage
-        self.verbose = verbose
+        self._setTicketPrice()
 
         # Helpful renaming
         self.rand = random.SystemRandom()
@@ -88,7 +87,7 @@ class EV0LottoSim(object):
 
         # Save some of the accounting variables
         self.gain = 0.0
-        self.loss = jackpot # Must shclep out money for first jackpot
+        self.loss = self.jackpot # Must shclep out money for first jackpot
         self.num_neg_trials = 0 # Haven't sold any tickets yet
         self.num_wins = 0
         self.stat_attrs = ('gain', 'loss', 'jackpot', 'num_neg_trials', \
@@ -111,12 +110,20 @@ class EV0LottoSim(object):
         for determining a winner.
         '''
         hds = ''.join(set(hexdigits.upper()))
-        ticket = [self.rand.choice(hds) for _ in range(self.nons)]
+        ticket = [self.rand.choice(hds) for _ in range(self.num_digits)]
         
         if self.perms:
             return ''.join(ticket)
         else:
             return ''.join(sorted(ticket))
+
+    def _generateTickets(self, n):
+        '''
+        Generate n random tickets as a set
+        '''
+        tickets = set(self._generateTicket() for _ in range(n))
+
+        return tickets
 
     def _loadBlockHashes(self):
         '''
@@ -131,7 +138,8 @@ class EV0LottoSim(object):
 
         Not meant to be called outside of the run method
         '''
-        header = '\nSimulation results for {} trials'.format(self.tix_total)
+        header = '\nSimulation results for {} drawings with {} tickets each'.\
+                    format(self.num_drawings, self.tix_total)
         print(header)
         print('{}\n'.format('-' * len(header)))
 
@@ -141,14 +149,22 @@ class EV0LottoSim(object):
         print('Max Jackpot: {}'.format(sorted(self.stats['jackpot'])[-1]))
         print('Total Gain: {}'.format(round(self.gain - self.loss, 8)))
 
+    def _setTicketPrice(self):
+        '''
+        Set the ticket price
+        '''
+        tp = self.jackpot / (self.odds * self.odds_reduction)
+        self.ticket_price = round(tp, 8)
+
     def _winningNumbersGen(self):
         '''
         Save a lucky numbers generator in the winning_nums attribute
         '''
+        nons = self.num_digits
         if self.perms:
-            wns = [''.join(hds[-self.nons:]) for hds in self.hash_list]
+            wns = [''.join(hds[-nons:]) for hds in self.hash_list]
         else:
-            wns = [''.join(sorted(hds[-self.nons:])) for hds in self.hash_list]
+            wns = [''.join(sorted(hds[-nons:])) for hds in self.hash_list]
         self.winning_nums = it.cycle(wns)
 
     def run(self):
@@ -162,17 +178,18 @@ class EV0LottoSim(object):
             -- See if any ticket was a winner
             -- Adjust the balance of the lotto accordingly
         '''
-        for n in range(self.tix_total):
+        for n in range(self.num_drawings):
             # Each trial brings in a gain from the ticket sold
-            self.gain += self.ticket_price
+            ticket_sales = self.ticket_price * self.tix_total
+            self.gain += ticket_sales
 
             # See if there's a winner
-            if next(self.winning_nums) == self._generateTicket():
+            if next(self.winning_nums) in self._generateTickets(self.tix_total):
                 # We have a winner!
                 self.num_wins += 1
 
                 # Pay out the jackpot
-                self.loss += self.jackpot
+                self.loss += self.jackpot 
 
                 # Reset the jackpot to its initial amount
                 self.jackpot = self.init['jackpot']
@@ -180,7 +197,7 @@ class EV0LottoSim(object):
                 # Start the new jackpot
                 self.loss += self.jackpot
             else:
-                self.jackpot += self.ticket_price * self.rollover
+                self.jackpot += ticket_sales * self.rollover
 
             # See if we're operating negatiely
             if self.gain - self.loss < 0:
@@ -201,6 +218,9 @@ class EV0LottoSim(object):
             # Make some space b/w trial reports to stderr
             if self.verbose and n != self.num_trials - 1:
                 self.se.write('\n')
+
+            # Reset the ticket price if necessary
+            self._setTicketPrice()
 
         self._reportResults()
 
@@ -282,7 +302,7 @@ def plot_runs(args):
         plt.ylabel('BTC')
         plt.xlabel('Simulation #')
         plt.title('Net Gain ({}% Positive) (Max: {}) (Min: {})'.\
-            format(per_pos, round(max(net_gain), 2), round(min(net_gain), 2))
+            format(per_pos, round(max(net_gain), 2), round(min(net_gain), 2)))
 
     def plot_tbws():
         plt.plot(range(1, len(tbws)+1),
@@ -316,8 +336,9 @@ def plot_runs(args):
     elif args.time_between_wins:
         plot_tbws()
 
-    descr = '{:,} Simulations ({:,} Tickets Each) ({}% rollover)\n'.\
-        format(args.simulations, args.tix_total, round(args.rollover * 100, 2))
+    descr = '{:,} Simulations ({:,} Drawings) ({:,} Tickets Each) ({}% rollover)\n'.\
+        format(args.simulations, args.num_drawings,
+                args.tix_total, round(args.rollover * 100, 2))
     descr += '1 in {} Odds ({} BTC Jackpot)\n'.format(sim.odds, args.jackpot)
     plt.annotate(descr, (0,0), (0, -20), 
             xycoords='axes fraction', 
@@ -332,13 +353,7 @@ def run_sim(args):
     Run a simulation and return the simulation 
     object
     '''
-    sim = EV0LottoSim(args.jackpot, 
-            args.tix_percentage,
-            args.tix_total,
-            args.num_digits, 
-            args.rollover,
-            args.perms,
-            args.verbose)
+    sim = EV0LottoSim(args)
     sim.run()
     return sim
 
@@ -362,6 +377,13 @@ if __name__ == '__main__':
                   , default=1.0
                   , help='Starting jackpot in BTC'
                   , type=float
+                  )
+
+    p.add_argument( '-n'
+                  , '--num-drawings'
+                  , default=1
+                  , help='Number of drawings to hold'
+                  , type=int
                   )
 
     p.add_argument( '--net-gain'
@@ -404,6 +426,13 @@ if __name__ == '__main__':
     p.add_argument( '--time-between-wins'
                   , action='store_true'
                   , help='Whether to plot time between wins'
+                  )
+
+    p.add_argument( '-u'
+                  , '--odds-reduction'
+                  , default=1.0
+                  , help='Percent to reduce odds for calculating ticket price'
+                  , type=float
                   )
 
     p.add_argument( '-v'
