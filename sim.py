@@ -87,7 +87,8 @@ class EV0LottoSim(object):
 
         # Save some of the accounting variables
         self.gain = 0.0
-        self.loss = self.jackpot # Must shclep out money for first jackpot
+        #self.loss = self.jackpot # Must shclep out money for first jackpot
+        self.loss = 0.0
         self.num_neg_trials = 0 # Haven't sold any tickets yet
         self.num_wins = 0
         self.stat_attrs = ('gain', 'loss', 'jackpot', 'num_neg_trials', \
@@ -153,7 +154,7 @@ class EV0LottoSim(object):
         '''
         Set the ticket price
         '''
-        tp = self.jackpot / (self.odds * self.odds_reduction)
+        tp = (self.jackpot / self.odds) * (1 + (1.0 - self.odds_reduction))
         self.ticket_price = round(tp, 8)
 
     def _winningNumbersGen(self):
@@ -220,7 +221,8 @@ class EV0LottoSim(object):
                 self.se.write('\n')
 
             # Reset the ticket price if necessary
-            self._setTicketPrice()
+            if self.adjust_tp:
+                self._setTicketPrice()
 
         self._reportResults()
 
@@ -364,6 +366,12 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=desc,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog='bitmia EV0 lotto simulator')
+
+    p.add_argument( '-a'
+                  , '--adjust-tp'
+                  , action='store_true'
+                  , help='Whether to adjust ticket price based on rollover'
+                  )
 
     p.add_argument( '-d'
                   , '--num-digits'
